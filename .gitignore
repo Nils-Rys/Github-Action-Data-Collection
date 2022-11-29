@@ -1,0 +1,22 @@
+# my virtulen folder
+py3working/
+
+#pycache
+__pycache__/
+
+# virtualen
+env/
+
+#vscode
+.vscode
+
+#tables
+commits.csv
+repositories.csv
+
+#jupyter
+.ipynb_checkpoints/
+
+# raw_data
+data/raw/
+.Rproj.user
