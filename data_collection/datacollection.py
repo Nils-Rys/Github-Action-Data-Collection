@@ -9,7 +9,7 @@ import sys
 import parse_log as _parse
 
 
-def fetch_data(organization_name, github_token,
+def fetch_data(organization_name, github_token, assignment_name,
 	filepath_repo = None, filepath_commit = None, debug = False):
 	"""
 	Generates a CSV file where each row stands for a repository in the specified organization
@@ -22,6 +22,8 @@ def fetch_data(organization_name, github_token,
 	github_token : str
 		A github token with at least the following permissions
 		 - Repo
+	assignment_name : str
+		a string containing the name of the assignment
 	filepath_repo : str
 		The filepath to save the CSV file with information on repositories
 		If None, the repository information will be returned
@@ -91,71 +93,85 @@ def fetch_data(organization_name, github_token,
 	num_commits = 0
 	#iterating through all repositories in an organization
 	for repo in list(organization.repositories(type = "all")):
+		repo_name = str(repo)
 		print(repo)
 		# repo = ""
-		#get the states (pass/fail/canceled) of every build associated with the current repo
-			#building the headers for the API call
-		headers = {
-			"Authorization": "token {}".format(github_token)
-		}
+		
+		if assignment_name in repo_name:
+			#get the states (pass/fail/canceled) of every build associated with the current repo
+				#building the headers for the API call
+			headers = {
+				"Authorization": "token {}".format(github_token)
+			}
 
-		#grabs all the runs data from the repo
-		response = requests.get(
-			url = "https://api.github.com/repos/{0}/actions/runs".format(
-				str(repo)
-			),
-			headers = headers
-		)
-		data = response.json()
-		# grabs all the commit data from the repo
-		git_commit = requests.get(
-			url = "https://api.github.com/repos/{0}/commits?page=1".format(
-				str(repo)
-			),
-			headers = headers
-		).json()
-		commits_count = len(git_commit)
-		page = 1
-		commit_number = 0
-		rebase_commit = 0
-		rebase_page = 1
-		prev_workflow = ""
-		for workflow_iterator in data["workflow_runs"]:
-			rebase_commit = commit_number
-			rebase_page = page
-			# In case the workflow has duplicates somehow
-			if(prev_workflow != workflow_iterator["head_sha"]):
-				name = workflow_iterator["actor"]["login"]
-				timestamp = workflow_iterator["updated_at"]
-				# gets all commits between actions
+			#grabs all the runs data from the repo
+			response = requests.get(
+				url = "https://api.github.com/repos/{0}/actions/runs".format(
+					str(repo)
+				),
+				headers = headers
+			)
+			data = response.json()
+			# grabs all the commit data from the repo
+			git_commit = requests.get(
+				url = "https://api.github.com/repos/{0}/commits?page=1".format(
+					str(repo)
+				),
+				headers = headers
+			).json()
+			commits_count = len(git_commit)
+			page = 1
+			commit_number = 0
+			rebase_commit = 0
+			rebase_page = 1
+			prev_workflow = ""
+			for workflow_iterator in data["workflow_runs"]:
+				rebase_commit = commit_number
+				rebase_page = page
+				# In case the workflow has duplicates somehow
+				if(prev_workflow != workflow_iterator["head_sha"]):
+					name = workflow_iterator["actor"]["login"]
+					timestamp = workflow_iterator["updated_at"]
+					# gets all commits between actions
 
-				while(commit_number < commits_count and workflow_iterator["head_sha"] != git_commit[commit_number]["sha"]):
-					print("Workflow: "+workflow_iterator["head_sha"])
-					print("git commit: "+git_commit[commit_number]["sha"])
-					commit_request = requests.get(
-						url = "https://api.github.com/repos/{0}/commits/{1}".format(
+					while(commit_number < commits_count and workflow_iterator["head_sha"] != git_commit[commit_number]["sha"]):
+						commit_request = requests.get(
+							url = "https://api.github.com/repos/{0}/commits/{1}".format(
+								str(repo),
+								git_commit[commit_number]["sha"]
+							),
+							headers = headers
+						).json()
+						
+						changed_lines = commit_request["stats"]["total"]
+						if(commit_request["author"] is None):
+							name = "N/A"
+						else:
+							name = commit_request["author"]["login"]
+						commits.append([
+							name,
+							commit_request["commit"]["committer"]["date"],
 							str(repo),
-							git_commit[commit_number]["sha"]
-						),
-						headers = headers
-					).json()
-					
-					changed_lines = commit_request["stats"]["total"]
-					if(commit_request["author"] is None):
-						name = "N/A"
-					else:
-						name = commit_request["author"]["login"]
-					commits.append([
-						name,
-						commit_request["commit"]["committer"]["date"],
-						str(repo),
-						0,
-						0,
-						"False",
-						changed_lines
-					])
-					num_commits += 1
-					commit_number += 1
+							0,
+							0,
+							"False",
+							changed_lines
+						])
+						num_commits += 1
+						commit_number += 1
+						# Checks if reached the end of the git page
+						if(commit_number == 30):
+							page += 1
+							git_commit = requests.get(
+								url = "https://api.github.com/repos/{0}/commits?page={1}".format(
+									str(repo),
+									page
+								),
+								headers = headers
+							).json()
+							commits_count = len(git_commit)
+							commit_number = 0
+						
 					# Checks if reached the end of the git page
 					if(commit_number == 30):
 						page += 1
@@ -168,8 +184,133 @@ def fetch_data(organization_name, github_token,
 						).json()
 						commits_count = len(git_commit)
 						commit_number = 0
+					# print("AFTER Workflow: "+workflow_iterator["head_sha"])
+					# if(commit_number<commits_count):
+					# 	print("AFTER git commit: "+git_commit[commit_number]["sha"])
+					# else:
+					# 	print("NO after Git")
+					# print(commits_count)
+					# print(commit_number)
 					
-				# Checks if reached the end of the git page
+					if(commit_number<commits_count):
+						# grabs the changed line count from the workflows commit
+						changed_lines = requests.get(
+							url = "https://api.github.com/repos/{0}/commits/{1}".format(
+								str(repo),
+								git_commit[commit_number]["sha"]
+							),
+							headers = headers
+						).json()["stats"]["total"]
+						commit_number += 1
+
+						# Gets all workflow jobs
+						workflow_response = requests.get(
+							url = "{0}".format(
+								workflow_iterator["jobs_url"]
+							),
+							headers = headers
+						)
+						# print(workflow_response.json())
+						job_id = workflow_response.json()["jobs"][0]["id"]
+
+						# grabs the build log from the workflow	 
+						build_log = requests.get(
+							url = "https://api.github.com/repos/{0}/actions/jobs/{1}/logs".format(
+								str(repo),
+								job_id
+							),
+							headers = headers
+						).text
+						# parses build log to see if the build was a success
+						info = _parse.get_pass_rate(build_log)
+						# case where build error occured
+						if(len(info) == 0):
+							tests_count = 1
+							tests_failed = 1
+							build_error = "True"
+						# case where passed all test cases
+						elif(len(info) == 1):
+							tests_count = 1
+							tests_failed = 0
+							build_error = "False"
+						# case where failed some test cases
+						elif(len(info) == 2):
+							tests_count = info[0]
+							tests_failed = info[1]
+							build_error = "False"
+						# case to catch failures, outside of what was found
+						else:
+							tests_count = info[0]
+							tests_failed = info[0]
+							build_error = "True"
+						
+						# appends the commit info to othe commit array which will transfer info to the csv
+						commits.append([
+							name,
+							timestamp,
+							str(repo),
+							tests_count,
+							tests_failed,
+							build_error,
+							changed_lines
+
+							
+						])
+						prev_workflow = workflow_iterator["head_sha"]
+					# end reached checks for rebase scenario
+					else:
+						while(commit_number != rebase_commit or page != rebase_page ):
+							# print("removing a commit")
+							if(commit_number == 0):
+								rebase_page -= 1
+								commit_number = 29
+								git_commit = requests.get(
+									url = "https://api.github.com/repos/{0}/commits?page={1}".format(
+										str(repo),
+										page
+									),
+									headers = headers
+								).json()
+								commits_count = len(git_commit)
+
+							else:
+								commit_number -= 1
+							num_commits -= 1
+							commits.pop()
+
+
+
+
+
+			num_commits += 1
+			# Retreives all commits done before the action tests
+			while(commit_number < commits_count):
+				commit_request = requests.get(
+					url = "https://api.github.com/repos/{0}/commits/{1}".format(
+						str(repo),
+						git_commit[commit_number]["sha"]
+					),
+					headers = headers
+				).json()
+				changed_lines = commit_request["stats"]["total"]
+				if(commit_request["author"] is None):
+					name = "N/A"
+				else:
+					name = commit_request["author"]["login"]
+
+				timestamp = commit_request["commit"]["committer"]["date"]
+
+				commits.append([
+					name,
+					timestamp,
+					str(repo),
+					0,
+					0,
+					"False",
+					changed_lines
+				])
+				num_commits += 1
+				commit_number += 1
 				if(commit_number == 30):
 					page += 1
 					git_commit = requests.get(
@@ -181,143 +322,6 @@ def fetch_data(organization_name, github_token,
 					).json()
 					commits_count = len(git_commit)
 					commit_number = 0
-				# print("AFTER Workflow: "+workflow_iterator["head_sha"])
-				# if(commit_number<commits_count):
-				# 	print("AFTER git commit: "+git_commit[commit_number]["sha"])
-				# else:
-				# 	print("NO after Git")
-				# print(commits_count)
-				# print(commit_number)
-				
-				if(commit_number<commits_count):
-					# grabs the changed line count from the workflows commit
-					changed_lines = requests.get(
-						url = "https://api.github.com/repos/{0}/commits/{1}".format(
-							str(repo),
-							git_commit[commit_number]["sha"]
-						),
-						headers = headers
-					).json()["stats"]["total"]
-					commit_number += 1
-
-					# Gets all workflow jobs
-					workflow_response = requests.get(
-						url = "{0}".format(
-							workflow_iterator["jobs_url"]
-						),
-						headers = headers
-					)
-					job_id = workflow_response.json()["jobs"][0]["id"]
-
-					# grabs the build log from the workflow	 
-					build_log = requests.get(
-						url = "https://api.github.com/repos/{0}/actions/jobs/{1}/logs".format(
-							str(repo),
-							job_id
-						),
-						headers = headers
-					).text
-					# parses build log to see if the build was a success
-					info = _parse.get_pass_rate(build_log)
-					# case where build error occured
-					if(len(info) == 0):
-						tests_count = 1
-						tests_failed = 1
-						build_error = "True"
-					# case where passed all test cases
-					elif(len(info) == 1):
-						tests_count = 1
-						tests_failed = 0
-						build_error = "False"
-					# case where failed some test cases
-					elif(len(info) == 2):
-						tests_count = info[0]
-						tests_failed = info[1]
-						build_error = "False"
-					# case to catch failures, outside of what was found
-					else:
-						tests_count = info[0]
-						tests_failed = info[0]
-						build_error = "True"
-					
-					# appends the commit info to othe commit array which will transfer info to the csv
-					commits.append([
-						name,
-						timestamp,
-						str(repo),
-						tests_count,
-						tests_failed,
-						build_error,
-						changed_lines
-
-						
-					])
-					prev_workflow = workflow_iterator["head_sha"]
-				# end reached checks for rebase scenario
-				else:
-					while(commit_number != rebase_commit or page != rebase_page ):
-						# print("removing a commit")
-						if(commit_number == 0):
-							rebase_page -= 1
-							commit_number = 29
-							git_commit = requests.get(
-								url = "https://api.github.com/repos/{0}/commits?page={1}".format(
-									str(repo),
-									page
-								),
-								headers = headers
-							).json()
-							commits_count = len(git_commit)
-
-						else:
-							commit_number -= 1
-						num_commits -= 1
-						commits.pop()
-
-
-
-
-
-		num_commits += 1
-		# Retreives all commits done before the action tests
-		while(commit_number < commits_count):
-			commit_request = requests.get(
-				url = "https://api.github.com/repos/{0}/commits/{1}".format(
-					str(repo),
-					git_commit[commit_number]["sha"]
-				),
-				headers = headers
-			).json()
-			changed_lines = commit_request["stats"]["total"]
-			if(commit_request["author"] is None):
-				name = "N/A"
-			else:
-				name = commit_request["author"]["login"]
-
-			timestamp = commit_request["commit"]["committer"]["date"]
-
-			commits.append([
-				name,
-				timestamp,
-				str(repo),
-				0,
-				0,
-				"False",
-				changed_lines
-			])
-			num_commits += 1
-			commit_number += 1
-			if(commit_number == 30):
-				page += 1
-				git_commit = requests.get(
-					url = "https://api.github.com/repos/{0}/commits?page={1}".format(
-						str(repo),
-						page
-					),
-					headers = headers
-				).json()
-				commits_count = len(git_commit)
-				commit_number = 0
 
 
 
@@ -342,10 +346,12 @@ def fetch_data(organization_name, github_token,
 if __name__ == '__main__':
 	org_name = sys.argv[1]
 	github_token = sys.argv[2]
+	assignment_name = sys.argv[3]
 	fetch_data(
 		org_name,
 		filepath_repo = "./repositories.csv",
 		filepath_commit = "./commits.csv",
 		github_token = github_token,
+		assignment_name = assignment_name,
 		debug = True
 	)

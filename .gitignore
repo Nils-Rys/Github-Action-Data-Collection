@@ -1,6 +1,13 @@
 # my virtulen folder
 py3working/
 
+# my virtulen folder
+folder_name/
+
+# data parser
+csv_reader.py
+# data image
+foo.png
 #pycache
 __pycache__/
 

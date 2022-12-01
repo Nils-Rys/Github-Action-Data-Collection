@@ -42,5 +42,9 @@ Create a GitHub Personal access token with repo scope.
 
 Type:
 ```
-python3 datacollection.py (Organization Name) (Git Token)
+python3 datacollection.py (Organization Name) (Git Token) (assingment name)
 ```
+
+(Organization Name) is the name for the github organization.
+(Git Token) is the personal access token with repo scope
+(assingment name) is the name for the assignment, for example Lab-1
