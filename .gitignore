@@ -19,6 +19,12 @@ env/
 
 #tables
 commits.csv
+commits-lab1-action.csv
+commits-lab2-action.csv
+commits-lab3-action.csv
+commits-lab4-action.csv
+commits-proj1-action.csv
+commits-proj2-action.csv
 repositories.csv
 
 #jupyter

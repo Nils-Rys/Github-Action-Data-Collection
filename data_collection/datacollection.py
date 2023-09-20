@@ -75,7 +75,7 @@ def fetch_data(organization_name, github_token, assignment_name,
 	]
 	header_commit = [ #repo index is meant for constant time lookup also it starts at 2 because after
 						#the header, excel will display the first row as 2
-		"username", "timestamp", "repo", "tests_count", "tests_failed", "build_error", "changed_lines"
+		"username", "commit_number", "timestamp", "repo", "tests_count", "tests_failed", "build_error", "added", "deleted"
 	]
 
 	#write the headers
@@ -107,18 +107,36 @@ def fetch_data(organization_name, github_token, assignment_name,
 			#grabs all the runs data from the repo
 			response = requests.get(
 				url = "https://api.github.com/repos/{0}/actions/runs".format(
-					str(repo)
+					str(repo),
+					"temp1"
 				),
 				headers = headers
 			)
 			data = response.json()
+			# remove all non branch specific runs
+			specialBranch = "reWorkflow"
+			tempJson = []
+			for tempData in data['workflow_runs']:
+				
+				if(tempData['head_branch'] != specialBranch):
+					tempJson.append(tempData)
+					
+			for tempData in tempJson:
+				# print("removed 1")
+				data['workflow_runs'].remove(tempData)
+
+			# print(data)
+			# print("\n\n BREAK \n\n")
 			# grabs all the commit data from the repo
 			git_commit = requests.get(
-				url = "https://api.github.com/repos/{0}/commits?page=1".format(
-					str(repo)
+				url = "https://api.github.com/repos/{0}/commits?page=1&sha={1}".format(
+					str(repo),
+					specialBranch
+
 				),
 				headers = headers
 			).json()
+			# print(git_commit)
 			commits_count = len(git_commit)
 			page = 1
 			commit_number = 0
@@ -133,29 +151,38 @@ def fetch_data(organization_name, github_token, assignment_name,
 					name = workflow_iterator["actor"]["login"]
 					timestamp = workflow_iterator["updated_at"]
 					# gets all commits between actions
+					# print(workflow_iterator["head_sha"])
+					# print(git_commit[commit_number]["sha"])
 
 					while(commit_number < commits_count and workflow_iterator["head_sha"] != git_commit[commit_number]["sha"]):
+
 						commit_request = requests.get(
-							url = "https://api.github.com/repos/{0}/commits/{1}".format(
+							url = "https://api.github.com/repos/{0}/commits/{1}?sha={2}".format(
 								str(repo),
-								git_commit[commit_number]["sha"]
+								git_commit[commit_number]["sha"],
+								specialBranch
 							),
 							headers = headers
 						).json()
-						
-						changed_lines = commit_request["stats"]["total"]
+						print(commit_request["stats"])
+						# print("\n\nBREAK \n\n")
+						additions = commit_request["stats"]["additions"]
+						deletions = commit_request["stats"]["deletions"]
+
 						if(commit_request["author"] is None):
 							name = "N/A"
 						else:
 							name = commit_request["author"]["login"]
 						commits.append([
 							name,
+							(commits_count - commit_number -1),
 							commit_request["commit"]["committer"]["date"],
 							str(repo),
 							0,
 							0,
 							"False",
-							changed_lines
+							additions,
+							deletions
 						])
 						num_commits += 1
 						commit_number += 1
@@ -163,9 +190,10 @@ def fetch_data(organization_name, github_token, assignment_name,
 						if(commit_number == 30):
 							page += 1
 							git_commit = requests.get(
-								url = "https://api.github.com/repos/{0}/commits?page={1}".format(
+								url = "https://api.github.com/repos/{0}/commits?page={1}&sha={2}".format(
 									str(repo),
-									page
+									page,
+									specialBranch
 								),
 								headers = headers
 							).json()
@@ -176,9 +204,10 @@ def fetch_data(organization_name, github_token, assignment_name,
 					if(commit_number == 30):
 						page += 1
 						git_commit = requests.get(
-							url = "https://api.github.com/repos/{0}/commits?page={1}".format(
+							url = "https://api.github.com/repos/{0}/commits?page={1}&sha={2}".format(
 								str(repo),
-								page
+								page,
+								specialBranch
 							),
 							headers = headers
 						).json()
@@ -195,12 +224,16 @@ def fetch_data(organization_name, github_token, assignment_name,
 					if(commit_number<commits_count):
 						# grabs the changed line count from the workflows commit
 						changed_lines = requests.get(
-							url = "https://api.github.com/repos/{0}/commits/{1}".format(
+							url = "https://api.github.com/repos/{0}/commits/{1}?sha={2}".format(
 								str(repo),
-								git_commit[commit_number]["sha"]
+								git_commit[commit_number]["sha"],
+								specialBranch
 							),
 							headers = headers
-						).json()["stats"]["total"]
+						).json()["stats"]#["total"]
+						additions = changed_lines["additions"]
+						deletions = changed_lines["deletions"]
+						# print(changed_lines)
 						commit_number += 1
 
 						# Gets all workflow jobs
@@ -247,12 +280,14 @@ def fetch_data(organization_name, github_token, assignment_name,
 						# appends the commit info to othe commit array which will transfer info to the csv
 						commits.append([
 							name,
+							(commits_count - commit_number -1),
 							timestamp,
 							str(repo),
 							tests_count,
 							tests_failed,
 							build_error,
-							changed_lines
+							additions,
+							deletions
 
 							
 						])
@@ -265,9 +300,10 @@ def fetch_data(organization_name, github_token, assignment_name,
 								rebase_page -= 1
 								commit_number = 29
 								git_commit = requests.get(
-									url = "https://api.github.com/repos/{0}/commits?page={1}".format(
+									url = "https://api.github.com/repos/{0}/commits?page={1}&sha={2}".format(
 										str(repo),
-										page
+										page,
+										specialBranch
 									),
 									headers = headers
 								).json()
@@ -286,37 +322,44 @@ def fetch_data(organization_name, github_token, assignment_name,
 			# Retreives all commits done before the action tests
 			while(commit_number < commits_count):
 				commit_request = requests.get(
-					url = "https://api.github.com/repos/{0}/commits/{1}".format(
+					url = "https://api.github.com/repos/{0}/commits/{1}?sha={2}".format(
 						str(repo),
-						git_commit[commit_number]["sha"]
+						git_commit[commit_number]["sha"],
+						specialBranch
 					),
 					headers = headers
 				).json()
-				changed_lines = commit_request["stats"]["total"]
+				
+				additions = commit_request["stats"]["additions"]
+				deletions = commit_request["stats"]["deletions"]
+
 				if(commit_request["author"] is None):
 					name = "N/A"
 				else:
 					name = commit_request["author"]["login"]
 
 				timestamp = commit_request["commit"]["committer"]["date"]
+				commit_number += 1
 
 				commits.append([
 					name,
+					(commits_count - commit_number -1),
 					timestamp,
 					str(repo),
 					0,
 					0,
 					"False",
-					changed_lines
+					additions,
+					deletions
 				])
 				num_commits += 1
-				commit_number += 1
 				if(commit_number == 30):
 					page += 1
 					git_commit = requests.get(
-						url = "https://api.github.com/repos/{0}/commits?page={1}".format(
+						url = "https://api.github.com/repos/{0}/commits?page={1}&sha={2}".format(
 							str(repo),
-							page
+							page,
+							specialBranch
 						),
 						headers = headers
 					).json()
